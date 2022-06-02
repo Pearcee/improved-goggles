@@ -1,7 +1,7 @@
 # Importing required modules
 import PyPDF2
 # Creating a pdf file object
-pdfFileObj = open('mypdf.pdf','rb')
+pdfFileObj = open('my.pdf','rb')
 # Creating a pdf reader object
 pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
 # Getting number of pages in pdf file
