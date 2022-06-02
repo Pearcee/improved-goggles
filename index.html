@@ -1,0 +1,296 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+<script>
+
+
+
+const queryString = window.location.search;
+const urlParams = new URLSearchParams(queryString);
+
+var data = [];
+var dailydata = [];
+var incl_vat = 0;
+var split_by_true_day=0;
+var octopus_rounding=1;
+
+function datestring(type) {	
+   var d1 = new Date(urlParams.get('startdate') + " (UTC)");
+   var d2 = new Date(urlParams.get('enddate') + " (UTC)");	
+
+  	if (type=='price') {	
+   		d2.setHours(24); 
+	        output = "?period_from=" + d1.toISOString() + "&period_to=" + d2.toISOString();
+}
+        else if (type=='consumption') {
+	        d2.setHours(23);
+		d2.setMinutes(30); 
+	        output = "?page_size=25000&period_from=" + d1.toISOString() + "&period_to=" + d2.toISOString();
+}
+   return output;
+}
+
+
+
+function checkparams() {
+	var errors = [];
+	output = '<H2>Octopus Agile Bill Calculator</H2>';
+	if (urlParams.has('key')==0) {
+		errors.push("Missing key"); }
+	if (urlParams.has('mpan')==0) {
+		errors.push("Missing mpan"); }
+	if (urlParams.has('meter')==0) {
+		errors.push("Missing meter"); }
+	if (urlParams.has('startdate')) {
+		if (urlParams.get('startdate').length!=10) {
+			errors.push("Wrong format for startdate"); }}
+		else { errors.push("Missing startdate"); } 
+	if (urlParams.has('enddate')) {
+		if (urlParams.get('enddate').length!=10) {
+			errors.push("Wrong format for enddate"); }}
+		else { errors.push("Missing enddate"); } 
+	if ((urlParams.has('incl_vat')==1) && (urlParams.get('incl_vat')=='1')) {
+		incl_vat=1; }	
+	if ((urlParams.has('split_by_true_day')==1) && (urlParams.get('split_by_true_day')==1)) {
+		split_by_true_day=1; }
+	if ((urlParams.has('octopus_rounding')==1) && (urlParams.get('octopus_rounding')==0)) {
+		octopus_rounding=0; }
+	if (errors.length) {
+             output += "<P>Problems with paramaters:";
+		
+	     for (i=0; i< errors.length; i++) {
+		     output += "<P>" + errors[i]; }
+	     output += "<P>The url parameters should be of the format ?key=sk&mpan=1111111111111&meter=17P1111111&startdate=2020-02-01&enddate=2020-03-29";
+	     }
+	else {
+	    output += "<P>This page calculates the bill between " + urlParams.get('startdate') + " and " + urlParams.get('enddate');
+		output += "<BR>Settings: incl_vat=" + incl_vat + ", split_by_true_day=" + split_by_true_day + ", octopus_rounding=" + octopus_rounding + ".</P>"
+            }
+
+	document.getElementById("header").innerHTML = output;
+        return (errors.length==0);
+}
+	
+function download_csv() {	
+    var csv = '';
+    if (incl_vat==1) {
+        csv+= 'DayStartTime,KWh,Price_inc_vat,Cost_inc_vat\n';
+
+    	for (i=0; i<dailydata.length; i++) {
+	    csv += dailydata[i][0] + "," + dailydata[i][1] + "," + dailydata[i][2]*1.05 + "," + dailydata[i][3]*1.05 + "\n";
+    	}
+    	csv += "\n";
+    	csv +=  'StartTime,KWh,Price_inc_vat,Cost_inc_vat\n';
+    	for (i=0; i<data.length; i++) {
+		csv += data[i][0] + "," + data[i][1] + "," + data[i][2]*1.05 + "," + data[i][3]*1.05 + "\n";
+    	}
+    }
+    else {
+        csv+= 'DayStartTime,KWh,Price_exc_vat,Cost_exc_vat\n';
+
+    	for (i=0; i<dailydata.length; i++) {
+	    csv += dailydata[i][0] + "," + dailydata[i][1] + "," + dailydata[i][2] + "," + dailydata[i][3] + "\n";
+    	}
+    	csv += "\n";
+    	csv +=  'StartTime,KWh,Price_exc_vat,Cost_exc_vat\n';
+    	for (i=0; i<data.length; i++) {
+		csv += data[i][0] + "," + data[i][1] + "," + data[i][2] + "," + data[i][3] + "\n";
+    	}
+    }
+    var hiddenElement = document.createElement('a');
+    hiddenElement.href = 'data:text/csv;charset=utf-8,' + encodeURI(csv);
+    hiddenElement.target = '_blank';
+    hiddenElement.download = 'billcalc.csv';
+    hiddenElement.click();
+
+}
+
+function roundeven(x) {
+    x = parseFloat(x.toFixed(1));
+    rounded = Math.round(x);
+    if (x.toFixed(1).substr(-1,1)==5) {
+        if (rounded/2>Math.trunc(rounded/2)) {
+            rounded-=1;}}
+    return rounded; }
+
+function processData(consumption, price ) {
+    if (consumption.count!=price.length) {
+	output = '<P>Missing data, ' + consumption.count + ' records for consumption, ' + price.length + ' for price';
+    }
+    else {
+	for (i=price.length-1; i>=0; i--) {
+		c = consumption.results[i].consumption;
+		p = price[i].value_exc_vat;
+                if (octopus_rounding==1) { 
+                    c = roundeven(c*100)/100;
+		    data.push([consumption.results[i].interval_start, c, p, roundeven(c*p*100)/100]);	
+                }
+                else {
+                    data.push([consumption.results[i].interval_start, c, p, c*p]);	
+                }
+	}	
+
+	    if (split_by_true_day==1) {
+	        for (i=0; i<data.length; i++) {
+		 if ((i == 0) || (data[i][0].substr(0,10)!=data[i-1][0].substr(0,10))) {
+			 dailydata.push(data[i].slice(0)); }
+		 else {
+			 dailydata[dailydata.length-1][1] += data[i][1];
+			 dailydata[dailydata.length-1][3] += data[i][3]; }
+		}
+	    }
+	    else {
+		for (i=0; i<data.length; i++) {
+		 if (i % 48 == 0) {
+			 dailydata.push(data[i].slice(0)); }
+		 else {
+			 dailydata[dailydata.length-1][1] += data[i][1];
+			 dailydata[dailydata.length-1][3] += data[i][3]; }}
+	    }
+
+	    total_consumption = 0;
+	    total_cost = 0;
+            for (i=0; i<dailydata.length; i++) {
+		    dailydata[i][2] = dailydata[i][3]/dailydata[i][1];
+		    total_consumption += dailydata[i][1];
+		    total_cost += dailydata[i][3];
+	    }
+
+
+	    numdays = Math.round(data.length/48);
+	    header = '<P>Total Consumption: ' + total_consumption.toFixed(2) + 'kWh, Average Price: ' + (total_cost/total_consumption).toFixed(2); 
+            if (octopus_rounding==1) {
+   	        header += 'p/kWh, Cost (exc VAT): £' + (Math.floor(total_cost)/100.0).toFixed(2) + '<BR>';
+	        header += numdays + ' days, Standing Charge: 20p/day, Cost: £' + (numdays*0.2).toFixed(2) + '<BR>';
+	        header += 'Total Cost with VAT: £' + ((Math.floor(total_cost)/100.0 + (numdays*0.2))*1.05).toFixed(2) + '</P>'; }
+            else {
+   	        header += 'p/kWh, Cost (exc VAT): £' + (total_cost/100.0).toFixed(2) + '<BR>';
+	        header += numdays + ' days, Standing Charge: 20p/day, Cost: £' + (numdays*0.2).toFixed(2) + '<BR>';
+	        header += 'Total Cost with VAT: £' + ((total_cost/100.0 + (numdays*0.2))*1.05).toFixed(2) + '</P>';}
+
+            output = header +  '<P><button onclick="download_csv()">Download to CSV</button> ';
+
+	    if (incl_vat==1) {
+                output += "<H2>Daily Totals</H2>";
+		output += "<P><TABLE><TR><TH>Day Start</TH><TH>Consumption (kwh)</TH><TH>Price_inc_vat<BR>(calculated average, p/kwh)</TH><TH>Cost_inc_vat<BR>(in pence)</TH></TR>";
+                for (i=0; i<dailydata.length; i++) {
+		    output +=  "<TR><TD>" + dailydata[i][0].substr(0,10) + "&nbsp; " + dailydata[i][0].substr(11) + "</TD><TD>" + dailydata[i][1].toFixed(3) + "</TD><TD>";
+		    output += (dailydata[i][2]*1.05).toFixed(3) + "</TD><TD>" + (dailydata[i][3]*1.05).toFixed(3) + "</TD></TR>";
+	        }
+                output += "<TR><TD>Total</TD><TD>" + total_consumption.toFixed(2) + "</TD><TD>" + (total_cost/total_consumption).toFixed(2) + "</TD><TD>" + (total_cost).toFixed(3) + "</TD></TR>";
+		output += '</TABLE></P>';
+                output += "<H2>Half Hourly Data</H2>";
+		output += "<P><TABLE><TR><TH>Start Time</TH><TH>Consumption (kwh)</TH><TH>Price_inc_vat</TH><TH>Cost_inc_vat (p)</TH></TR>";  
+
+		for (i = 0; i<data.length; i++) {
+	    	    output += "<TR><TD>" + data[i][0].substr(0,10) + "&nbsp; " + data[i][0].substr(11) + "</TD><TD>"; 
+                    output += data[i][1].toFixed(3) + "</TD><TD>" + data[i][2].toFixed(3) + "</TD><TD>" + data[i][3].toFixed(3) + "</TD></TR>";
+		}
+        	output += "</TABLE>";
+
+	    }
+	    else {
+                output += "<H2>Daily Totals</H2>";
+                output += "<P><TABLE><TR><TH>Day Start</TH><TH>Consumption (kwh)</TH><TH>Price_exc_vat <BR>(calculated average, p/kwh)</TH><TH>Cost_exc_vat <BR>(in pence)</TH></TR>";
+                for (i=0; i<dailydata.length; i++) {
+		    output +=  "<TR><TD>" + dailydata[i][0].substr(0,10) + " &nbsp; " + dailydata[i][0].substr(11) + "</TD><TD>" + dailydata[i][1].toFixed(3) + "</TD><TD>";
+		    output += dailydata[i][2].toFixed(3) + "</TD><TD>" + dailydata[i][3].toFixed(3) + "</TD></TR>";
+	        }
+                output += "<TR><TD>Total</TD><TD>" + total_consumption.toFixed(2) + "</TD><TD>" + (total_cost/total_consumption).toFixed(2) + "</TD><TD>" + (total_cost).toFixed(3) + "</TD></TR>";
+	        output += '</TABLE></P>';
+                output += "<H2>Half Hourly Data</H2>";
+		output += "<P><TABLE><TR><TH>Start Time</TH><TH>Consumption (kwh)</TH><TH>Price_exc_vat <BR>(published, p/kwh) </TH><TH>Cost_exc_vat<BR>(in pence)</TH></TR>";
+		for (i = 0; i<data.length; i++) {
+	    	    output += "<TR><TD>" + data[i][0].substr(0,10) + " &nbsp; " + data[i][0].substr(11) + "</TD><TD>";
+                    output += data[i][1].toFixed(3) + "</TD><TD>" + data[i][2].toFixed(3) + "</TD><TD>" + data[i][3].toFixed(3) + "</TD></TR>";
+		}
+        	output += "</TABLE>";
+	    }
+            
+	    
+		}
+    document.getElementById("results").innerHTML = output;
+}
+
+function loadURLwithKey(url) {
+  var xhttp = new XMLHttpRequest();
+  var output = {status: 0, content: "empty"};
+  xhttp.open("GET", url , false);
+  xhttp.setRequestHeader("Authorization", "Basic " + btoa(urlParams.get('key') ) + ":");	
+  xhttp.send();
+  output.status = 1;
+  output.content = JSON.parse(xhttp.response);
+  return output; 	
+}
+
+function loadURL(url) {
+  var xhttp = new XMLHttpRequest();
+  var output = {status: 0, content: "empty"};
+  xhttp.open("GET", url , false);
+  xhttp.send();
+  output.status = 1;
+  output.content = JSON.parse(xhttp.response);
+  return output; 	
+
+}
+
+function loadMultipageURL(url) {    	
+    var outputs = [];
+    output = loadURL(url);
+    outputs = output.content.results;
+    while (typeof output.content.next == "string" ) {
+	output = loadURL(output.content.next);
+	outputs = outputs.concat(output.content.results);
+    }
+    output.content = outputs;
+    return output;
+}
+
+
+
+function loadDoc() {
+    if (checkparams()) {
+	   consumptionurl = "https://api.octopus.energy/v1/electricity-meter-points/" + urlParams.get('mpan') + "/meters/" + urlParams.get('meter') + "/consumption/"; 
+           consumptionurl += datestring('consumption');
+           consumption = loadURLwithKey(consumptionurl).content;
+           regionurl = 'https://api.octopus.energy/v1/electricity-meter-points/' + urlParams.get('mpan');
+	   region = loadURL(regionurl) 
+	   priceurl = "https://api.octopus.energy/v1/products/AGILE-18-02-21/electricity-tariffs/E-1R-AGILE-18-02-21-" + region.content.gsp.substr(-1,1) + "/standard-unit-rates/"; 
+	   priceurl += datestring('price');
+	   price = loadMultipageURL(priceurl).content;
+
+	    document.getElementById("urls").innerHTML = consumptionurl + "<BR>" + priceurl + "<BR>";
+           //document.getElementById("results").innerHTML = JSON.stringify(consumption);
+           processData(consumption, price);
+	}
+}
+
+
+</script>
+<style>
+table, th, td {
+  border: 1px solid black;
+  border-collapse: collapse;
+  padding: 3px;
+}
+</style>
+</head>
+
+<body onload="loadDoc()">
+
+<div id="header" >None
+</div>
+	
+<div id="results" >None
+</div>
+
+<H2>URLs requested</H2>
+<div id="urls" >None
+</div>
+
+
+
+</body>
+</html>
+
